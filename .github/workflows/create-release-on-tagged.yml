@@ -1,0 +1,66 @@
+name: Build with Ahk2Exe and Create Release
+on:
+  push:
+    tags:
+      - 'v*'
+env:
+  AHK_VERSION: "2.0.18"
+  AHK2EXE_VERSION: "1.1.37.01c1"
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set env of OUTPUT_NAME
+        id: step_output_name
+        shell: pwsh
+        run: |
+          echo "OUTPUT_NAME=ThumbReSense_$( $env:GITHUB_REF -replace '^refs/.*/' ).exe" >> $env:GITHUB_OUTPUT
+      - name: expand Ahk2Exe
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://github.com/AutoHotkey/AutoHotkey/releases/download/v${{ env.AHK_VERSION }}/AutoHotkey_${{ env.AHK_VERSION }}_setup.exe -OutFile .\AutoHotkey_setup.exe;
+          Invoke-WebRequest https://github.com/AutoHotkey/Ahk2Exe/releases/download/Ahk2Exe${{ env.AHK2EXE_VERSION }}/Ahk2Exe${{ env.AHK2EXE_VERSION }}.zip -OutFile .\Ahk2Exe.zip;
+          .\AutoHotkey_setup.exe /silent /elevate;
+          Expand-Archive -Path .\Ahk2Exe.zip -DestinationPath .\Ahk2Exe\ -Force;
+      - name: build to ${{ steps.step_output_name.outputs.OUTPUT_NAME }}
+        shell: pwsh
+        run: .\Ahk2Exe\Ahk2Exe.exe /base "$env:ProgramFiles\AutoHotkey\v2\AutoHotkey64.exe" /in .\ThumbReSense.ah2 /out ".\${{ steps.step_output_name.outputs.OUTPUT_NAME }}";
+      - name: Upload ${{ steps.step_output_name.outputs.OUTPUT_NAME }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: built_exe
+          path: ${{ steps.step_output_name.outputs.OUTPUT_NAME }}
+    outputs:
+      output_name: ${{ steps.step_output_name.outputs.OUTPUT_NAME }}
+  release:
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download ${{ needs.build.outputs.output_name }}
+        uses: actions/download-artifact@v4
+        with:
+          name: built_exe
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: ThumbReSense ${{ github.ref }}
+          body: |
+            Version ${{ github.ref }}
+          draft: false
+          prerelease: false
+      - name: Upload Release Asset
+        id: upload-release-asset 
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./${{ needs.build.outputs.output_name }}
+          asset_name: ${{ needs.build.outputs.output_name }}
+          asset_content_type: application/octet-stream
