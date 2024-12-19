@@ -53,9 +53,25 @@ Default Hotkey:
 * `c` : End
 * `x` : Ctrl+End
 * `z` : Alt+Tab
+* `Ctrl`+`q` : Exit This App
+* `F2`, `F3` : Sample MessageBox
 
 To customise the behaviour, place `ThumbReSense.ini` in the same location as the executable file.
 An example description is given in [ThumbReSense.ini](./ThumbReSense.ini).
 
 動作をカスタマイズするには、実行ファイルと同じ場所に `ThumbReSense.ini` を設置する。
 記述例は [ThumbReSense.ini](./ThumbReSense.ini) を参照。
+
+## Known Issue
+
+When touching and releasing the touch screen quickly and repeatedly while remapping to the mouse button, the cursor temporarily stops moving on the touch screen.
+This is a problem on the AutoHotKey side, so we expect a fix on the AutoHotKey side.
+The workaround is to leave the touch panel touched for a few seconds and it will come back immediately.
+
+マウスボタンにリマップ中に、タッチパネルに触れたり離したりを素早く繰り返すと、一時的にタッチパネルでカーソルが動かなくなる。
+これは、 AutoHotKey 側の問題なので AutoHotKey 側の修正に期待したい。
+数秒タッチパネルに触れたままにしておくとすぐ復活するのがワークアラウンドだ。
+
+## このソフトに関する日本語の記事
+
+[AutoHotKey v2 で 令和の ThumbSense | Aqua Ware つぶやきブログ](https://aquasoftware.net/blog/?p=2243)

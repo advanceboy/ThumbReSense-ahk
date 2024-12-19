@@ -40,7 +40,7 @@ for key In GetPrivateProfileString(ini_file_path, "Hotkeys") {
     s.AddHotkey("c", "Send('{End}')")
     s.AddHotkey("x", "Send('^{End}')") ; move to end
     s.AddHotkey("z", "Send('!{Tab}')") ; Alt+Tab (switches to the previous window)
-    s.AddHotkey("^q", "")
+    s.AddHotkey("^q", "ExitApp")
     s.AddHotkey("F2", "MsgBox")
     s.AddHotkey("F3", 'MsgBox(`'any text from ThumbReSense`', "Title: ``"title``"", 0x40136)')
 }
