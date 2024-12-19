@@ -29,10 +29,10 @@ for key In GetPrivateProfileString(ini_file_path, "Hotkeys") {
     ; see: https://www.autohotkey.com/docs/v2/Hotkeys.htm , https://www.autohotkey.com/docs/v2/KeyList.htm
     s.AddHotkey("u", "Click 2") ; double click
     s.AddHotkey("r", "Click(2)")
-    s.AddHotkey("l", "Send '{Browser_Back}'") ; like Alt+Left
-    s.AddHotkey(";", "Send('{Browser_Forward}')") ; like Alt+Right
-    s.AddHotkey("i", "Send('{WheelUp}')")
-    s.AddHotkey(",", "Send('{WheelDown}')")
+    s.AddHotkey(";", "Send '{Browser_Back}'") ; like Alt+Left
+    s.AddHotkey(":", "Send('{Browser_Forward}')") ; like Alt+Right
+    s.AddHotkey("o", "Send('{WheelUp}')")
+    s.AddHotkey(".", "Send('{WheelDown}')")
     s.AddHotkey("XButton1", "Send('{Home}')")
     s.AddHotkey("e", "Send('{Home}')")
     s.AddHotkey("w", "Send('^{Home}')") ; move to top
@@ -40,8 +40,21 @@ for key In GetPrivateProfileString(ini_file_path, "Hotkeys") {
     s.AddHotkey("c", "Send('{End}')")
     s.AddHotkey("x", "Send('^{End}')") ; move to end
     s.AddHotkey("z", "Send('!{Tab}')") ; Alt+Tab (switches to the previous window)
+    s.AddHotkey("^q", "")
+    s.AddHotkey("F2", "MsgBox")
+    s.AddHotkey("F3", 'MsgBox(`'any text from ThumbReSense`', "Title: ``"title``"", 0x40136)')
 }
 
+
+s.IsPalmRejectionEnabled := Integer(GetPrivateProfileString(ini_file_path, "Option", "IsPalmRejectionEnabled", "1"))
+
+; Enable swipe scrolling
+if Integer(GetPrivateProfileString(ini_file_path, "SwipeScroll", "SwipeScrollEnabled", "1")) {
+    swipe_scroll_key := GetPrivateProfileString(ini_file_path, "SwipeScroll", "SwipeScrollKey", "l")
+    s.SetSwipeScroll(swipe_scroll_key)
+    s.SwipeScrollRatio := Number(GetPrivateProfileString(ini_file_path, "SwipeScroll", "SwipeScrollRatio", "1.0"))
+
+}
 
 ; Enable mouse inertia
 s.IsInertiaEnabled := Integer(GetPrivateProfileString(ini_file_path, "Inertia", "IsInertiaEnabled", "1"))
@@ -53,6 +66,8 @@ s.Start()
 
 class ThumbSensor {
     static WM_INPUT            := 0x00FF
+    static WM_MOUSEWHEEL       := 0x020A
+    static WM_MOUSEHWHEEL      := 0x020E
     static RIDEV_REMOVE        := 0x00000001
     static RIDEV_PAGEONLY      := 0x00000020
     static RIDEV_INPUTSINK     := 0x00000100
@@ -72,10 +87,12 @@ class ThumbSensor {
     __New() {
         this._is_activated := false
         this._is_started := false
+        this._palm_rejection := true
+        this._swipe_scroll := ""
+        this._swipe_scroll_ratio := 1.0
         this._is_inertia_enabled := false
         this._inertia_conductivity := ThumbSensor.DEFAULT_INERTIA_CONDUCTIVITY
         this._inertia_min_initial_speed := ThumbSensor.DEFAULT_INERTIA_MIN_INITIAL_SPEED
-        this.palm_rejection := true
         this.CapsResultMap := Map()
         this.pressing_remap_key_map := Map()
         this.mouse_history := MouseHistory()
@@ -83,6 +100,11 @@ class ThumbSensor {
         this.last_unix_time_ms := 0 ; system time
         this.scan_current := 0
         this.is_scan_invoked := false
+        this.is_pressing_swipe_scroll_key := false
+        /** @param {ScanInfo} scan */
+        this.swipe_last_scan := 0
+        this.swipe_scroll_orientation := ""
+        this.swipe_scroll_mod := 0.0
         this.inertia_move_last_time_ms := 0
         this.inertia_move_lastx := ThumbSensor.INT_MIN_VALUE
         this.inertia_move_lasty := ThumbSensor.INT_MIN_VALUE
@@ -126,6 +148,12 @@ class ThumbSensor {
             }
         }
     }
+    IsPalmRejectionEnabled {
+        set => this._palm_rejection := Value
+    }
+    SwipeScrollRatio {
+        set => this._swipe_scroll_ratio := Value
+    }
     IsInertiaEnabled {
         set => this._is_inertia_enabled := Value
     }
@@ -151,11 +179,18 @@ class ThumbSensor {
     AddRemap(key, remap) {
         _this := this
         key_name := GetKeyName(key)
-        if !key_name {
+        remap_name := GetKeyName(remap)
+        if RegExMatch(remap_name, "^(?:[LRM]Button|XButton\d+|Wheel(?:Down|Up|Left|Right))$") {
+            set_delay_func := SetMouseDelay
+        } else {
+            set_delay_func := SetKeyDelay
+        }
+
+        if key_name == "" {
             throw Error("invalid key name: " . key)
         }
         HotIfCallbackClosureForDown(HotkeyName) {
-            return _this.IsActivated && !_this.pressing_remap_key_map.Has(key_name)
+            return _this.IsActivated
         }
         HotIfCallbackClosureForUp(HotkeyName) {
             return _this.IsActivated || _this.pressing_remap_key_map.Has(key_name)
@@ -163,12 +198,14 @@ class ThumbSensor {
         ; remap implementation using hotkey
         ; see: https://ahkscript.github.io/ja/docs/v2/misc/Remap.htm#remarks
         RemapDownCallbackClosure(HotkeyName) {
-            SetKeyDelay(-1)
-            Send("{Blind}{" . remap . " DownR}")
-            _this.pressing_remap_key_map.Set(key_name, 0)
+            if !_this.pressing_remap_key_map.Has(key_name) {
+                set_delay_func(-1)
+                Send("{Blind}{" . remap . " DownR}")
+                _this.pressing_remap_key_map.Set(key_name, 0)
+            }
         }
         RemapUpCallbackClosure(HotkeyName) {
-            SetKeyDelay(-1)
+            set_delay_func(-1)
             Send("{Blind}{" . remap . " Up}")
             if _this.pressing_remap_key_map.Has(key_name) {
                 _this.pressing_remap_key_map.Delete(key_name)
@@ -191,18 +228,18 @@ class ThumbSensor {
             func_t := %func_name% ; Get Func Like Object
             pos += StrLen(m[0])
             
-            if (n := RegExMatch(Action, "i)(`"(?:[^`"]|(?<=``)`")*`"|'(?:[^']|(?<=``)')*'|0x[0-9a-f]+|\d+(?:\.\d+)?)", &m, pos)) !== 0 {
+            if (n := RegExMatch(Action, "i)(`"(?:[^`"]|(?<=``)`")*`"|'(?:[^']|(?<=``)')*'|0x[0-9a-f]+|\d+(?:\.\d+)?)(?=\W|$)", &m, pos)) !== 0 {
                 arg := m[1]
                 if Ord(arg) == 0x22 || Ord(arg) == 0x27 {
-                    func_t := func_t.Bind(RegExReplace(SubStr(arg, 2, -1), "``(?=[``;:{nrbtsvaf'`"])", ""))
+                    func_t := func_t.Bind(RegExReplace(SubStr(arg, 2, -1), "``(?=[``;:{nrbtsvaf'`"])", "")) ; remove quoting and escaping
                 } else {
                     func_t := func_t.Bind(0 + arg)
                 }
                 pos += StrLen(m[0])
-                while (n := RegExMatch(Action, "i)\s*,\s*(`"(?:[^`"]|(?<=``)`")*`"|'(?:[^']|(?<=``)')*'|0x[0-9a-f]+|\d+(?:\.\d+)?)", &m, pos)) !== 0 {
+                while (n := RegExMatch(Action, "i)\s*,\s*(`"(?:[^`"]|(?<=``)`")*`"|'(?:[^']|(?<=``)')*'|0x[0-9a-f]+|\d+(?:\.\d+)?)(?=\W|$)", &m, pos)) !== 0 {
                     arg := m[1]
                     if Ord(arg) == 0x22 || Ord(arg) == 0x27 {
-                        func_t := func_t.Bind(RegExReplace(SubStr(arg, 2, -1), "``(?=[``;:{nrbtsvaf'`"])", ""))
+                        func_t := func_t.Bind(RegExReplace(SubStr(arg, 2, -1), "``(?=[``;:{nrbtsvaf'`"])", "")) ; remove quoting and escaping
                     } else {
                         a:=0 + arg
                         func_t := func_t.Bind(0 + arg)
@@ -234,18 +271,92 @@ class ThumbSensor {
         HotIf()
     }
 
+    SetSwipeScroll(key) {
+        _this := this
+        key_name := GetKeyName(key)
+        if key_name == "" {
+            throw Error("invalid key name: " . key)
+        }
+
+        HotIf(HotkeyName => _this.IsActivated)
+        Hotkey("*" . key, ObjBindMethod(this, "_OnSwipeScrollKeyDown"))
+        HotIf(HotkeyName => _this.IsActivated || _this.is_pressing_swipe_scroll_key)
+        Hotkey("*" . key . " up", ObjBindMethod(this, "_OnSwipeScrollKeyUp"))
+        HotIf() ; end HotIf
+    }
+    _OnSwipeScrollKeyDown(HotKeyName) {
+        if !this.is_pressing_swipe_scroll_key {
+            this.is_pressing_swipe_scroll_key := true
+            this.swipe_last_scan := 0
+            this.swipe_scroll_orientation := ""
+            this.swipe_scroll_mod := 0.0
+            BlockInput("MouseMove")
+        }
+    }
+    _OnSwipeScrollKeyUp(HotKeyName) {
+        this.is_pressing_swipe_scroll_key := false
+        BlockInput("MouseMoveOff")
+    }
+    /** @param {ScanInfo} scan */
+    _OnSwipeScrollScanCompleted(scan, mouse_pos_x, mouse_pos_y) {
+        if this.swipe_last_scan {
+            ; identify the most moved contact
+            max_diff_x := 0
+            max_diff_y := 0
+            contact_cur_ids := scan.GetTouching(this._palm_rejection)
+            contact_cur_map := scan.GetContactMap(this._palm_rejection)
+            contact_last_map := this.swipe_last_scan.GetContactMap(this._palm_rejection)
+            for id IN contact_cur_ids {
+                if contact_last_map.Has(id) {
+                    ; intercected list
+                    diff_x := contact_cur_map[id].touch_pos_x - contact_last_map[id].touch_pos_x
+                    if Abs(max_diff_x) < Abs(diff_x) {
+                        max_diff_x := diff_x
+                    }
+                    diff_y := contact_cur_map[id].touch_pos_y - contact_last_map[id].touch_pos_y
+                    if Abs(max_diff_y) < Abs(diff_y) {
+                        max_diff_y := diff_y
+                    }
+                }
+            }
+
+            ; post wheel msg
+            pos := Buffer()
+            hWnd := DllCall("WindowFromPoint", "UInt64", (mouse_pos_y<<32)|(mouse_pos_x&0xffffffff), "Ptr")
+            if this.swipe_scroll_orientation == "" {
+                if Abs(max_diff_x) > Abs(max_diff_y) {
+                    this.swipe_scroll_orientation := "H"
+                } else {
+                    this.swipe_scroll_orientation := "V"
+                }
+            }
+            if this.swipe_scroll_orientation == "V" {
+                scroll_count_float := max_diff_y * this._swipe_scroll_ratio + this.swipe_scroll_mod
+                scroll_count := Integer(scroll_count_float)
+                this.swipe_scroll_mod := scroll_count_float - scroll_count
+                PostMessage(ThumbSensor.WM_MOUSEWHEEL, scroll_count << 16, (mouse_pos_y<<16)|mouse_pos_x, hWnd)
+            } else if this.swipe_scroll_orientation == "H" {
+                scroll_count_float := max_diff_x * this._swipe_scroll_ratio + this.swipe_scroll_mod
+                scroll_count := Integer(scroll_count_float)
+                this.swipe_scroll_mod := scroll_count_float - scroll_count
+                PostMessage(ThumbSensor.WM_MOUSEHWHEEL, scroll_count << 16, (mouse_pos_y<<16)|mouse_pos_x, hWnd)
+            }
+        }
+        this.swipe_last_scan := scan
+    }
+
     /**
      * @param {MousePos} mouse_avg 
      */
     SetInertia(mouse_avg) {
         if this._is_inertia_enabled {
-            speed := Sqrt(mouse_avg.pos_x ** 2 + mouse_avg.pos_y ** 2) * 10
+            speed := Sqrt(mouse_avg.mouse_pos_x ** 2 + mouse_avg.mouse_pos_y ** 2) * 10
             if speed > this._inertia_min_initial_speed {
-                this.inertia_move_last_time_ms := ScanInfo.GetCurrentUnixTimeMilliseconds()
+                this.inertia_move_last_time_ms := GetCurrentUnixTimeMilliseconds()
                 this.inertia_move_lastx := ThumbSensor.INT_MIN_VALUE
                 this.inertia_move_lasty := ThumbSensor.INT_MIN_VALUE
-                this.inertia_move_dx := mouse_avg.pos_x
-                this.inertia_move_dy := mouse_avg.pos_y
+                this.inertia_move_dx := mouse_avg.mouse_pos_x
+                this.inertia_move_dy := mouse_avg.mouse_pos_y
                 this.inertia_move_fixed_counter := 0
                 SetTimer(this.inertia_move_RunInertia_timer_callback, ThumbSensor.RUN_INERTIA_INTERVAL_MS, 1000)
             }
@@ -257,7 +368,7 @@ class ThumbSensor {
 
     RunInertia() {
         Critical("On")
-        current_time_ms := ScanInfo.GetCurrentUnixTimeMilliseconds()
+        current_time_ms := GetCurrentUnixTimeMilliseconds()
         diff_time_ms := current_time_ms - this.inertia_move_last_time_ms
         this.inertia_move_last_time_ms := current_time_ms
 
@@ -313,14 +424,18 @@ class ThumbSensor {
      */
     OnScanCompleted(scan) {
         ; set the IsActivated for HotIf
-        touching_list := scan.GetTouching(this.palm_rejection)
-        this.IsActivated := touching_list.Length !== 0
-
+        touching_list := scan.GetTouching(this._palm_rejection)
         ; store mous pos history
         if (scan.unix_time_ms - this.last_unix_time_ms) >= 5 {
-            ThumbSensor.GetCursorPos(&pos_x, &pos_y)
+            ThumbSensor.GetCursorPos(&mouse_pos_x, &mouse_pos_y)
             this.last_unix_time_ms := scan.unix_time_ms
-            this.mouse_history.Push(pos_x, pos_y, scan.unix_time_ms)
+            this.mouse_history.Push(mouse_pos_x, mouse_pos_y, scan)
+        }
+        
+        this.IsActivated := touching_list.Length !== 0
+
+        if this.is_pressing_swipe_scroll_key {
+            this._OnSwipeScrollScanCompleted(scan, mouse_pos_x, mouse_pos_y)
         }
     }
 
@@ -378,15 +493,16 @@ class ThumbSensor {
     }
 
     OnRawInput(wParam, lParam, msg, hwnd) { ; WM_INPUT
-        ri_hid_result := this._GetRawInputHidData(lParam)
-        if (!IsNumber(ri_hid_result)) {
-            try {
-                this.AnalyzeReport(ri_hid_result)
-            } catch as err {
-                this.err_counter += 1
-                if this.err_counter > 255 {
-                    throw err
-                }
+        Critical("On")
+        try {
+            ri_hid_result := this._GetRawInputHidData(lParam)
+            if (!IsNumber(ri_hid_result)) {
+                    this.AnalyzeReport(ri_hid_result)
+            }
+        } catch as err {
+            this.err_counter += 1
+            if this.err_counter > 255 {
+                throw err
             }
         }
         return DllCall("DefWindowProcW", "Ptr", hwnd, "UInt", msg, "Ptr", wParam, "Ptr", lParam, "Ptr")
@@ -517,10 +633,11 @@ class ThumbSensor {
      }
 }
 class MousePos {
-    __New(pos_x, pos_y, unix_time_ms) {
-        this.pos_x := pos_x
-        this.pos_y := pos_y
-        this.unix_time_ms := unix_time_ms
+    __New(mouse_pos_x, mouse_pos_y, scan) {
+        this.mouse_pos_x := mouse_pos_x
+        this.mouse_pos_y := mouse_pos_y
+        /** @type {ScanInfo} */
+        this.scan := scan
     }
 }
 class MouseHistory {
@@ -541,8 +658,8 @@ class MouseHistory {
         }
         return this._start_idx_zero_started + 1
     }
-    Push(pos_x, pos_y, unix_time_ms) {
-        this._buffer[this._start_idx_zero_started + 1] := MousePos(pos_x, pos_y, unix_time_ms)
+    Push(mouse_pos_x, mouse_pos_y, scan) {
+        this._buffer[this._start_idx_zero_started + 1] := MousePos(mouse_pos_x, mouse_pos_y, scan)
         this._increment()
     }
     Clear() {
@@ -568,7 +685,7 @@ class MouseHistory {
             cur_idx_zero_started := this._start_idx_zero_started - 1
         }
         last_pos := this._buffer[cur_idx_zero_started + 1]
-        last_ms := last_pos.unix_time_ms
+        last_ms := last_pos.scan.unix_time_ms
         cur_pos := this._buffer[cur_idx_zero_started + 1]
         ; go back to start position or %ms% time ago
         loop {
@@ -582,7 +699,7 @@ class MouseHistory {
                 }
             }
             cur_pos := this._buffer[cur_idx_zero_started + 1]
-            if ms < (last_ms - cur_pos.unix_time_ms) {
+            if ms < (last_ms - cur_pos.scan.unix_time_ms) {
                 return this._calcVector(last_pos, cur_pos, least_ms)
             }
         }
@@ -595,11 +712,11 @@ class MouseHistory {
      * @returns {MousePos}
      */
     _calcVector(last_pos, cur_pos, least_ms) {
-        diff_ms := last_pos.unix_time_ms - cur_pos.unix_time_ms
+        diff_ms := last_pos.scan.unix_time_ms - cur_pos.scan.unix_time_ms
         if diff_ms < least_ms {
             return false
         }
-        return MousePos((last_pos.pos_x - cur_pos.pos_x) / diff_ms, (last_pos.pos_y - cur_pos.pos_y) / diff_ms, diff_ms)
+        return MousePos((last_pos.mouse_pos_x - cur_pos.mouse_pos_x) / diff_ms, (last_pos.mouse_pos_y - cur_pos.mouse_pos_y) / diff_ms, diff_ms)
     }
 }
 class UsageAndPage {
@@ -637,12 +754,12 @@ class UsageAndPage {
     }
 }
 class ContactInfo {
-    __New(contact_id, is_tipped, is_confided, pos_x, pos_y) {
+    __New(contact_id, is_tipped, is_confided, touch_pos_x, touch_pos_y) {
         this.contact_id := contact_id
         this.is_tipped := is_tipped
         this.is_confided := is_confided
-        this.pos_x := pos_x
-        this.pos_y := pos_y
+        this.touch_pos_x := touch_pos_x
+        this.touch_pos_y := touch_pos_y
     }
 }
 class ScanInfo {
@@ -650,7 +767,7 @@ class ScanInfo {
         /** @type {Array<Integer, ContactInfo>} */
         this._array := Array()
         this._contact_count := contact_count
-        this.unix_time_ms := ScanInfo.GetCurrentUnixTimeMilliseconds()
+        this.unix_time_ms := GetCurrentUnixTimeMilliseconds()
     }
     /** @param {ContactInfo} contact_info */
     PushContact(contact_info) {
@@ -673,12 +790,66 @@ class ScanInfo {
         }
         return ret
     }
-    static GetCurrentUnixTimeMilliseconds() {
-        buf := Buffer(8, 0) ; FILETIME
-        DllCall("GetSystemTimeAsFileTime", "Ptr", buf.Ptr)
-        filetime_millisecond := (NumGet(buf, 0, "UInt") // 10000) + ((NumGet(buf, 4, "UInt") << 28) // 625) ; FILETIME.dwHighDateTime // 10000 + (FILETIME.dwHighDateTime << 32) // 10000 without overflows
-        return filetime_millisecond - 11644473600000
+    /**
+     * Get touching contact_id to scan map
+     * @param {Integer} palm_rejection
+     * @returns {Map<String, ContactInfo>}
+     */
+    GetContactMap(palm_rejection) {
+        ret := Map()
+        for c IN this._array {
+            if palm_rejection && c.is_tipped && c.is_confided || !palm_rejection && c.is_tipped {
+                ret.Set(c.contact_id, c)
+            }
+        }
+        return ret
     }
+}
+GetCurrentUnixTimeMilliseconds() {
+    buf := Buffer(8, 0) ; FILETIME
+    DllCall("GetSystemTimeAsFileTime", "Ptr", buf.Ptr)
+    filetime_millisecond := (NumGet(buf, 0, "UInt") // 10000) + ((NumGet(buf, 4, "UInt") << 28) // 625) ; FILETIME.dwHighDateTime // 10000 + (FILETIME.dwHighDateTime << 32) // 10000 without overflows
+    return filetime_millisecond - 11644473600000
+}
+GetPrivateProfileString(FileName, AppName, KeyName := unset, Default := unset) {
+    ; IniRead of ahk is not user friendly, so direct win32 api call
+    char_len := 4096
+    if IsSet(KeyName) {
+        type_keyName := "Str"
+        val_keyName := KeyName
+    } else {
+        type_keyName := "Ptr"
+        val_keyName := 0
+    }
+    loop 4 {
+        bufW := Buffer(char_len * 2)
+        nret_len := DllCall("GetPrivateProfileStringW", "Str", AppName, type_keyName, val_keyName, "Ptr", 0, "Ptr", bufW.Ptr, "Int", char_len, "Str", FileName, "Int")
+        if (IsSet(KeyName) && nret_len - 1 == char_len) || (nret_len - 2 >= char_len) {
+            char_len *= 2
+            continue
+        }
+        break
+    }
+    if IsSet(KeyName) {
+        ret_value := StrGet(bufW)
+        if ret_value == "" && IsSet(Default) {
+            return Default
+        } else {
+            return ret_value
+        }
+    }
+
+    ; split \0
+    got_str := StrGet(bufW, -nret_len, "UTF-16") ; includes \0
+    start_idx := 1
+    result_array := Array()
+    loop nret_len {
+        if Ord(SubStr(got_str, A_Index, 1)) == 0 {
+            result_array.Push(SubStr(got_str, start_idx, A_Index - start_idx))
+            start_idx := A_Index + 1
+        }
+    }
+    return result_array
 }
 ; --------------------------------------------------------------
 ; Struct Parsers
@@ -957,44 +1128,4 @@ class ArraySortable extends Array {
         }
         return tmp
     }
-}
-GetPrivateProfileString(FileName, AppName, KeyName := unset, Default := unset) {
-    ; IniRead of ahk is not user friendly, so direct win32 api call
-    char_len := 4096
-    if IsSet(KeyName) {
-        type_keyName := "Str"
-        val_keyName := KeyName
-    } else {
-        type_keyName := "Ptr"
-        val_keyName := 0
-    }
-    loop 4 {
-        bufW := Buffer(char_len * 2)
-        nret_len := DllCall("GetPrivateProfileStringW", "Str", AppName, type_keyName, val_keyName, "Ptr", 0, "Ptr", bufW.Ptr, "Int", char_len, "Str", FileName, "Int")
-        if (IsSet(KeyName) && nret_len - 1 == char_len) || (nret_len - 2 >= char_len) {
-            char_len *= 2
-            continue
-        }
-        break
-    }
-    if IsSet(KeyName) {
-        ret_value := StrGet(bufW)
-        if ret_value == "" && IsSet(Default) {
-            return Default
-        } else {
-            return ret_value
-        }
-    }
-
-    ; split \0
-    got_str := StrGet(bufW, -nret_len, "UTF-16") ; includes \0
-    start_idx := 1
-    result_array := Array()
-    loop nret_len {
-        if Ord(SubStr(got_str, A_Index, 1)) == 0 {
-            result_array.Push(SubStr(got_str, start_idx, A_Index - start_idx))
-            start_idx := A_Index + 1
-        }
-    }
-    return result_array
 }

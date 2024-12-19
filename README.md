@@ -1,19 +1,33 @@
 # ThumbReSense-ahk
 
 ThumbSense Inspired touchpad shortcut utility software.
-This software provides the ability to give inertia to the cursor and remap keys that are only triggered when the touchpad is touched.
+This software provides the power of AutoHotKey to give the cursor inertia and the ability to remap keys that are only triggered when the touchpad is touched.
 
 --
 
 ThumbSense インスパイアされたタッチパッドのショートカットユーティリティソフトウェアです。
-このソフトは、カーソルに慣性を与えたり、タッチパッドに触れた時のみ発動するキーのリマップの機能を提供します。
+このソフトは AutoHotKey のパワーにより、カーソルに慣性を与えたり、タッチパッドに触れた時のみ発動するキーのリマップの機能を提供します。
 
 Inertia Mouse Pos / 慣性マウス:
 ![](/images/inertia.gif)
 
+## Setup
+
+Download `ThumbReSense_v*.exe` from the [releases page](https://github.com/advanceboy/ThumbReSense-ahk/releases) and run
+
+or
+
+Open [ThumbReSense.ah2](./ThumbReSense.ah2) with [AutoHotKey v2.0+](https://www.autohotkey.com/)
+
 ## How to Use
 
-Run `ThumbReSense_v*.exe`
+While touching the touchpad, the following functions are enabled.
+
+タッチパッドに触れている間、以下の機能が有効になる。
+
+Default Scroll Key:
+
+* `l`
 
 Default Remap:
 
@@ -28,12 +42,12 @@ Default Hotkey:
 
 * `u` : Double Click
 * `r` : Double Click
-* `l` : Browser Back
-* `;` : Browser Forward
-* `i` : WheelUp
-* `,` : WheelDown
-* `e` : Home
+* `;` : Browser Back
+* `:` : Browser Forward
+* `o` : WheelUp
+* `.` : WheelDown
 * `XButton1` : Home
+* `e` : Home
 * `w` : Ctrl+Home
 * `XButton2` : End
 * `c` : End
