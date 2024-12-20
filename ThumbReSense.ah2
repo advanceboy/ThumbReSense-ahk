@@ -373,7 +373,9 @@ class ThumbSensor {
         this.inertia_move_last_time_ms := current_time_ms
 
         ; MouseGetPos and MouseMove do not work well with window scaling or multiscreen
-        ThumbSensor.GetCursorPos(&pos_x, &pos_y)
+        if !ThumbSensor.GetCursorPos(&pos_x, &pos_y) {
+            return ; skip on error
+        }
         if this.inertia_move_lastx == ThumbSensor.INT_MIN_VALUE {
             this.inertia_move_lastx := pos_x
         }
@@ -390,31 +392,32 @@ class ThumbSensor {
                 this.StopInertia()
                 return
             }
+            set_cursor_pos_result := true
         } else {
             this.inertia_move_fixed_counter := 0
-            ThumbSensor.SetCursorPos(pos_x + dx, pos_y + dy)
+            set_cursor_pos_result := ThumbSensor.SetCursorPos(pos_x + dx, pos_y + dy)
         }
-        ThumbSensor.GetCursorPos(&pos_x, &pos_y)
-        this.inertia_move_lastx := pos_x - dx_float + dx
-        this.inertia_move_lasty := pos_y - dy_float + dy
-        conductivity := this._inertia_conductivity ** (diff_time_ms/10)
-        this.inertia_move_dx *= conductivity
-        this.inertia_move_dy *= conductivity
+        if set_cursor_pos_result && ThumbSensor.GetCursorPos(&pos_x, &pos_y) {
+            this.inertia_move_lastx := pos_x - dx_float + dx
+            this.inertia_move_lasty := pos_y - dy_float + dy
+            conductivity := this._inertia_conductivity ** (diff_time_ms/10)
+            this.inertia_move_dx *= conductivity
+            this.inertia_move_dy *= conductivity
+        }
     }
 
     static GetCursorPos(&pos_x, &pos_y) {
         buf := Buffer(8, 0)
         if DllCall("GetCursorPos", "Ptr", buf.Ptr, "UChar") == 0 {
-            throw Error("GetCursorPos returns nonzero")
+            return false
         }
         pos_x := NumGet(buf, 0, "Int")
         pos_y := NumGet(buf, 4, "Int")
+        return true
     }
 
     static SetCursorPos(pos_x, pos_y) {
-        if DllCall("SetCursorPos", "Int", pos_x, "Int", pos_y, "UChar") == 0 {
-            throw Error("SetCursorPos returns nonzero")
-        }
+        return DllCall("SetCursorPos", "Int", pos_x, "Int", pos_y, "UChar") != 0
     }
 
     /**
@@ -427,9 +430,10 @@ class ThumbSensor {
         touching_list := scan.GetTouching(this._palm_rejection)
         ; store mous pos history
         if (scan.unix_time_ms - this.last_unix_time_ms) >= 5 {
-            ThumbSensor.GetCursorPos(&mouse_pos_x, &mouse_pos_y)
-            this.last_unix_time_ms := scan.unix_time_ms
-            this.mouse_history.Push(mouse_pos_x, mouse_pos_y, scan)
+            if ThumbSensor.GetCursorPos(&mouse_pos_x, &mouse_pos_y) {
+                this.last_unix_time_ms := scan.unix_time_ms
+                this.mouse_history.Push(mouse_pos_x, mouse_pos_y, scan)
+            }
         }
         
         this.IsActivated := touching_list.Length !== 0
